@@ -3,6 +3,7 @@
  * buffers the caller keeps, so no frame needs a buffer of its own. */
 #include "libyuv/convert_argb.h"
 #include "libyuv/scale.h"
+#include "libyuv/rotate.h"
 
 /* The same layout as decode.c's. */
 struct yapfast_picture {
@@ -39,4 +40,17 @@ void yapfast_i420_to_rgba(const struct yapfast_picture *picture, unsigned char *
   }
   /* libyuv's ABGR is R, G, B, A in memory. */
   I420ToABGR(y, y_stride, u, u_stride, v, v_stride, rgba, stride, width, height);
+}
+
+/* Rotate before fitting so portrait and landscape use their displayed dimensions. */
+int yapfast_i420_rotate(const struct yapfast_picture *picture, unsigned char *out,
+                        int rotation) {
+  int width = rotation == 90 || rotation == 270 ? picture->height : picture->width;
+  int height = rotation == 90 || rotation == 270 ? picture->width : picture->height;
+  int chroma = (width + 1) / 2;
+  unsigned char *u = out + (size_t)width * height;
+  unsigned char *v = u + (size_t)chroma * ((height + 1) / 2);
+  return I420Rotate(picture->y, picture->y_stride, picture->u, picture->u_stride,
+                    picture->v, picture->v_stride, out, width, u, chroma, v, chroma,
+                    picture->width, picture->height, (enum RotationMode)rotation);
 }

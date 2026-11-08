@@ -25,6 +25,8 @@ pub(crate) struct RawPicture {
 }
 
 unsafe extern "C" {
+    fn yapfast_i420_rotate(picture: *const RawPicture, out: *mut c_uchar, rotation: c_int)
+    -> c_int;
     fn yapfast_i420_to_rgba(
         picture: *const RawPicture,
         scratch: *mut c_uchar,
@@ -93,6 +95,55 @@ impl<'a> I420<'a> {
             y_stride: self.strides[0] as c_int,
             u_stride: self.strides[1] as c_int,
             v_stride: self.strides[2] as c_int,
+        }
+    }
+
+    /// Applies clockwise camera orientation into reusable storage. An unrotated
+    /// frame borrows its original planes without copying.
+    pub fn rotated<'b>(&'b self, rotation: u16, scratch: &'b mut Vec<u8>) -> I420<'b> {
+        if rotation == 0 {
+            return *self;
+        }
+        assert!(matches!(rotation, 90 | 180 | 270));
+        let (width, height) = if rotation == 180 {
+            (self.width, self.height)
+        } else {
+            (self.height, self.width)
+        };
+        let luma = width as usize * height as usize;
+        let chroma = width.div_ceil(2) as usize * height.div_ceil(2) as usize;
+        scratch.resize(luma + 2 * chroma, 0);
+        for (plane, rows, columns, stride) in [
+            (self.y, self.height, self.width, self.strides[0]),
+            (
+                self.u,
+                self.height.div_ceil(2),
+                self.width.div_ceil(2),
+                self.strides[1],
+            ),
+            (
+                self.v,
+                self.height.div_ceil(2),
+                self.width.div_ceil(2),
+                self.strides[2],
+            ),
+        ] {
+            assert!(stride >= columns && plane.len() >= stride as usize * rows as usize);
+        }
+        // SAFETY: all input rows were checked and scratch holds all three output planes.
+        let result = unsafe {
+            yapfast_i420_rotate(&self.raw(), scratch.as_mut_ptr(), c_int::from(rotation))
+        };
+        assert_eq!(result, 0);
+        let (y, rest) = scratch.split_at(luma);
+        let (u, v) = rest.split_at(chroma);
+        I420 {
+            width,
+            height,
+            y,
+            u,
+            v,
+            strides: [width, width.div_ceil(2), width.div_ceil(2)],
         }
     }
 
@@ -396,6 +447,84 @@ impl Feed {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn camera_rotation_turns_every_plane_before_fitting() {
+        // Padded strides and odd sizes cover the shapes phone cameras use
+        // as well as decoded frames whose rows have alignment padding.
+        for (width, height) in [(4u32, 2u32), (3, 5)] {
+            let stride = width + 2;
+            let chroma_stride = width.div_ceil(2) + 1;
+            let y: Vec<u8> = (0..stride * height).map(|i| i as u8 + 1).collect();
+            let u: Vec<u8> = (0..chroma_stride * height.div_ceil(2))
+                .map(|i| i as u8 + 80)
+                .collect();
+            let v: Vec<u8> = u.iter().map(|i| i + 40).collect();
+            let picture = I420 {
+                width,
+                height,
+                y: &y,
+                u: &u,
+                v: &v,
+                strides: [stride, chroma_stride, chroma_stride],
+            };
+            let mut scratch = Vec::new();
+            for rotation in [0, 90, 180, 270] {
+                let turned = picture.rotated(rotation, &mut scratch);
+                let swap = rotation == 90 || rotation == 270;
+                assert_eq!(
+                    (turned.width, turned.height),
+                    if swap {
+                        (height, width)
+                    } else {
+                        (width, height)
+                    }
+                );
+                for (input, output, w, h, input_stride, output_stride) in [
+                    (
+                        picture.y,
+                        turned.y,
+                        width,
+                        height,
+                        picture.strides[0],
+                        turned.strides[0],
+                    ),
+                    (
+                        picture.u,
+                        turned.u,
+                        width.div_ceil(2),
+                        height.div_ceil(2),
+                        picture.strides[1],
+                        turned.strides[1],
+                    ),
+                    (
+                        picture.v,
+                        turned.v,
+                        width.div_ceil(2),
+                        height.div_ceil(2),
+                        picture.strides[2],
+                        turned.strides[2],
+                    ),
+                ] {
+                    for y in 0..h {
+                        for x in 0..w {
+                            let (tx, ty) = match rotation {
+                                90 => (h - 1 - y, x),
+                                180 => (w - 1 - x, h - 1 - y),
+                                270 => (y, w - 1 - x),
+                                _ => (x, y),
+                            };
+                            assert_eq!(
+                                input[(y * input_stride + x) as usize],
+                                output[(ty * output_stride + tx) as usize],
+                                "rotation {rotation}, plane {w}x{h}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     fn first(buffer: &dyn FrameBuffer) -> u8 {
         (buffer as &dyn Any)

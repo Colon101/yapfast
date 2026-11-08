@@ -1032,6 +1032,7 @@ mod tests {
             sequence: 0,
             timestamp: 0,
             ssrc,
+            orientation: None,
             payload: &[],
         };
         assert_eq!(

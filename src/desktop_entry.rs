@@ -84,10 +84,13 @@ pub(crate) fn install_in(data: &Path, system: &[PathBuf], image: &Path) -> io::R
 /// The packaged entry, run from `image`.
 fn entry(image: &str) -> String {
     let tried = image.replace('\\', "\\\\");
-    ENTRY.replace(
-        "\nExec=yapfast --open-link %u\n",
-        &format!("\nTryExec={tried}\nExec={} --open-link %u\n", quoted(image)),
-    )
+    ENTRY
+        .replace("io.github.yapfast.Yapfast", APP_ID)
+        .replace("\nName=Yapfast\n", "\nName=Yapfast — Kfir\n")
+        .replace(
+            "\nExec=yapfast --open-link %u\n",
+            &format!("\nTryExec={tried}\nExec={} --open-link %u\n", quoted(image)),
+        )
 }
 
 /// Whether an AppImage manager, such as Gear Lever or AppImageLauncher, gave

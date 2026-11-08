@@ -8950,3 +8950,47 @@ fn a_long_message_folds_until_show_more_only_with_the_switch_on() {
     window.invoke_preferences_changed();
     assert!(adapter.borrow().layout.collapse_long);
 }
+
+#[test]
+fn voice_chat_docks_beside_the_call_without_a_floating_video() {
+    i_slint_backend_testing::init_no_event_loop();
+    let window = YapfastWindow::new().unwrap();
+    window.set_workspace(true);
+    window.set_room_selected(true);
+    window.set_voice_room(true);
+    window.set_voice_here(true);
+    window.set_voice_active(true);
+    window.set_pip_kind(3);
+    window.show().unwrap();
+    for width in [900., 1120., 1600.] {
+        window
+            .window()
+            .set_size(slint::LogicalSize::new(width, 760.));
+        window.set_voice_chat(false);
+        slint::platform::update_timers_and_animations();
+        assert!(window.get_grid_shown());
+        assert!(!window.get_pip_shown());
+        assert_eq!(window.get_voice_chat_width(), 0.);
+        let full = window.get_voice_stage_width();
+        window.set_voice_chat(true);
+        slint::platform::update_timers_and_animations();
+        let (stage, chat) = (
+            window.get_voice_stage_width(),
+            window.get_voice_chat_width(),
+        );
+        assert!(stage > 0. && chat > 0. && chat <= 420.);
+        assert!((stage + chat - full).abs() < 1.);
+        assert!(stage < full && window.get_grid_shown());
+        assert!(
+            !window.get_pip_shown(),
+            "opening chat must not float video over messages"
+        );
+        window.set_voice_chat(false);
+        assert!((window.get_voice_stage_width() - full).abs() < 1.);
+    }
+    window.set_voice_here(false);
+    assert!(
+        window.get_pip_shown(),
+        "navigating away still provides picture in picture"
+    );
+}

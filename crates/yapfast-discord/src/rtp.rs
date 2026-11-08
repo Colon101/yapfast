@@ -514,6 +514,8 @@ pub struct Packet<'a> {
     pub sequence: u16,
     pub timestamp: u32,
     pub ssrc: u32,
+    /// The CVO byte (extension 4), when this packet carries camera orientation.
+    pub orientation: Option<u8>,
     pub payload: &'a [u8],
 }
 
@@ -524,9 +526,36 @@ pub fn parse(packet: &[u8]) -> Option<Packet<'_>> {
         return None;
     }
     let mut start = HEADER + usize::from(first & 0x0f) * 4;
+    let mut orientation = None;
     if first & 0x10 != 0 {
+        let profile = u16::from_be_bytes([*packet.get(start)?, *packet.get(start + 1)?]);
         let words = u16::from_be_bytes([*packet.get(start + 2)?, *packet.get(start + 3)?]);
-        start += 4 + usize::from(words) * 4;
+        let end = start + 4 + usize::from(words) * 4;
+        let mut extensions = packet.get(start + 4..end)?;
+        // RFC 8285: both the one-byte and two-byte extension formats.
+        while !extensions.is_empty() && (profile == 0xbede || profile & 0xfff0 == 0x1000) {
+            let id = extensions[0];
+            extensions = &extensions[1..];
+            if id == 0 {
+                continue;
+            }
+            let (id, length) = if profile == 0xbede {
+                if id >> 4 == 15 {
+                    break;
+                }
+                (id >> 4, usize::from(id & 0x0f) + 1)
+            } else {
+                let length = usize::from(*extensions.first()?);
+                extensions = &extensions[1..];
+                (id, length)
+            };
+            let value = extensions.get(..length)?;
+            if id == 4 && length == 1 {
+                orientation = Some(value[0]);
+            }
+            extensions = &extensions[length..];
+        }
+        start = end;
     }
     let padding = if first & 0x20 != 0 {
         usize::from(*packet.last()?)
@@ -540,6 +569,7 @@ pub fn parse(packet: &[u8]) -> Option<Packet<'_>> {
         sequence: u16::from_be_bytes([packet[2], packet[3]]),
         timestamp: u32::from_be_bytes([packet[4], packet[5], packet[6], packet[7]]),
         ssrc: u32::from_be_bytes([packet[8], packet[9], packet[10], packet[11]]),
+        orientation,
         payload: packet.get(start..end)?,
     })
 }
@@ -550,6 +580,7 @@ pub struct Assembled {
     pub data: Vec<u8>,
     pub keyframe: bool,
     pub timestamp: u32,
+    pub orientation: Option<u8>,
 }
 
 /// The largest frame put together, far above a 4K keyframe.
@@ -561,6 +592,7 @@ pub struct Assembler {
     codec: Codec,
     frame: Vec<u8>,
     timestamp: Option<u32>,
+    orientation: Option<u8>,
     expected: Option<u16>,
     damaged: bool,
     keyframe: bool,
@@ -586,6 +618,7 @@ impl Assembler {
             codec,
             frame: vec![],
             timestamp: None,
+            orientation: None,
             expected: None,
             damaged: false,
             keyframe: false,
@@ -626,10 +659,14 @@ impl Assembler {
             self.obu.clear();
             self.obu_open = false;
             self.timestamp = Some(packet.timestamp);
+            self.orientation = None;
             self.damaged = gap;
             self.keyframe = false;
         } else {
             self.damaged |= gap;
+        }
+        if let Some(orientation) = packet.orientation {
+            self.orientation = Some(orientation);
         }
         let first = self.frame.is_empty();
         match self.codec {
@@ -674,6 +711,7 @@ impl Assembler {
                 data,
                 keyframe: self.keyframe,
                 timestamp: packet.timestamp,
+                orientation: self.orientation,
             }),
             lost,
         }
@@ -1237,6 +1275,8 @@ pub struct Held {
     pub sequence: u16,
     pub timestamp: u32,
     pub ssrc: u32,
+    /// The CVO byte (extension 4), when this packet carries camera orientation.
+    pub orientation: Option<u8>,
     pub payload: Vec<u8>,
 }
 
@@ -1248,6 +1288,7 @@ impl Held {
             sequence: packet.sequence,
             timestamp: packet.timestamp,
             ssrc: packet.ssrc,
+            orientation: packet.orientation,
             payload: packet.payload.to_vec(),
         }
     }
@@ -1259,6 +1300,7 @@ impl Held {
             sequence: self.sequence,
             timestamp: self.timestamp,
             ssrc: self.ssrc,
+            orientation: self.orientation,
             payload: &self.payload,
         }
     }
@@ -1282,6 +1324,7 @@ impl Held {
             sequence: u16::from_be_bytes(*sequence),
             timestamp: packet.timestamp,
             ssrc: media,
+            orientation: packet.orientation,
             payload: payload.to_vec(),
         })
     }
@@ -1524,6 +1567,73 @@ pub fn sender_reports(mut rtcp: &[u8]) -> Vec<(u32, u32)> {
 mod tests {
     use super::*;
 
+    // A phone's CVO metadata must survive packet reordering and RTX, not
+    // just parsing, before the camera decoder can orient its output.
+    fn oriented(packet: &[u8], profile: u16, extensions: &[u8]) -> Vec<u8> {
+        assert_eq!(extensions.len() % 4, 0);
+        let payload = parse(packet).unwrap().payload;
+        let mut out = packet[..HEADER].to_vec();
+        out[0] |= 0x10;
+        out.extend_from_slice(&profile.to_be_bytes());
+        out.extend_from_slice(&(extensions.len() as u16 / 4).to_be_bytes());
+        out.extend_from_slice(extensions);
+        out.extend_from_slice(payload);
+        out
+    }
+
+    #[test]
+    fn camera_orientation_survives_extensions_reassembly_and_retransmission() {
+        let mut packetizer = Packetizer::new(5, Codec::Vp8);
+        let packets = packetizer.packets(&vec![0x10; CHUNK * 3], 3000, true);
+        for (profile, extension) in [(0xbede, [0x40, 9, 0, 0]), (0x1000, [4, 1, 9, 0])] {
+            let mut assembler = Assembler::new(Codec::Vp8);
+            let mut frame = None;
+            for (index, bytes) in packets.iter().enumerate() {
+                // A CVO byte on the first fragment must survive the rest
+                // of the frame, including its camera-direction bit.
+                let bytes = if index == 0 {
+                    oriented(bytes, profile, &extension)
+                } else {
+                    bytes.clone()
+                };
+                let packet = parse(&bytes).unwrap();
+                let held = Held::new(&packet);
+                assert_eq!(held.packet().orientation, packet.orientation);
+                if index == 0 {
+                    let rtx = oriented(
+                        &packetizer.retransmit(&bytes, 6).unwrap(),
+                        profile,
+                        &extension,
+                    );
+                    assert_eq!(
+                        Held::unwrap_rtx(&parse(&rtx).unwrap(), 5)
+                            .unwrap()
+                            .orientation,
+                        Some(9)
+                    );
+                }
+                frame = assembler.push(&held.packet()).frame.or(frame);
+            }
+            assert_eq!(frame.unwrap().orientation, Some(9));
+        }
+        let packet = &packets[0];
+        assert!(
+            parse(&oriented(packet, 0xbede, &[0x43, 1, 2, 3])).is_none(),
+            "truncated element"
+        );
+        assert!(
+            parse(&oriented(packet, 0x1000, &[4, 5, 1, 2])).is_none(),
+            "truncated two-byte element"
+        );
+        assert_eq!(
+            parse(&oriented(packet, 0xbede, &[0xf0, 0x40, 1, 0]))
+                .unwrap()
+                .orientation,
+            None,
+            "reserved ID stops parsing"
+        );
+    }
+
     #[test]
     fn reads_report_blocks() {
         let report = receiver_report(1, 77, (1000, 12, 3), (0, 0));
@@ -1670,6 +1780,7 @@ mod tests {
             sequence: packetizer.sequence,
             timestamp: 0,
             ssrc: 5,
+            orientation: None,
             payload: &[],
         };
         packetizer.sequence = packetizer.sequence.wrapping_add(1);
@@ -1705,6 +1816,7 @@ mod tests {
             sequence,
             timestamp: 0,
             ssrc: 5,
+            orientation: None,
             payload: vec![sequence as u8],
         };
         let sequences =
@@ -1743,6 +1855,7 @@ mod tests {
             sequence,
             timestamp: 0,
             ssrc: 5,
+            orientation: None,
             payload: vec![0],
         };
         let mut reorder = Reorder::default();
@@ -1792,6 +1905,7 @@ mod tests {
                 sequence,
                 timestamp: 3000,
                 ssrc: 5,
+                orientation: None,
                 payload: &payload,
             });
             // W=1, Z and Y: the one element continues the last packet's
