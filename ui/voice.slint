@@ -1487,3 +1487,110 @@ export component Soundboard inherits Rectangle {
         }
     }
 }
+
+// The release's call stage, reused for its full voice view and DM calls.
+export component CallStage inherits Rectangle {
+    in property <bool> voice-here;
+    in property <bool> voice-panel;
+    in property <[PersonRow]> call-people;
+    in property <string> call-note;
+    in property <bool> call-incoming;
+    in property <string> call-room;
+    in property <bool> can-join;
+    callback answer-call(string, bool);
+    in property <string> room-name;
+    in property <string> voice-description;
+    in property <bool> preview;
+    in property <bool> call-encrypted;
+    in property <bool> voice-active;
+    callback join-voice;
+    in-out property <bool> stage-full;
+    in property <[PersonRow]> participants;
+    in property <[image]> participant-frames;
+    in property <bool> camera-starting;
+    in property <bool> sharing;
+    in property <bool> share-live;
+    in property <string> share-status;
+    in property <image> share-frame;
+    in property <[PersonRow]> share-viewers;
+    in property <string> share-viewer-names;
+    in property <[int]> stream-tiles;
+    in property <string> watch-user;
+    in property <image> watch-frame;
+    in property <string> watch-status;
+    in property <[PersonRow]> watch-viewers;
+    in property <string> watch-viewer-names;
+    in property <int> call-focus;
+    callback focus-tile(int);
+    callback watch-stream(string);
+    callback stop-watching;
+    callback open-voice-menu(string, PersonRow, length, length);
+    in property <string> voice-channel;
+    callback call-tiles(int, length, length, length, length, length, length, int, length, length);
+    in property <bool> muted;
+    in property <bool> deafened;
+    in property <bool> voice-ready;
+    in property <bool> voice-leaving;
+    in property <bool> can-share;
+    in property <bool> can-film;
+    in property <bool> camera-on;
+    in property <bool> can-soundboard;
+    callback toggle-camera;
+    callback toggle-mute;
+    callback toggle-deafen;
+    callback toggle-share;
+    callback open-share-menu(length, length);
+    callback open-soundboard(length, length);
+    callback leave-voice;
+    min-width: 0px;
+    clip: true;
+    background: Theme.stage;
+    if !root.voice-here && !root.voice-panel: CallInvite {
+        call-people: root.call-people; call-note: root.call-note; call-incoming: root.call-incoming;
+        call-room: root.call-room; can-join: root.can-join;
+        answer-call(room, accept) => { root.answer-call(room, accept); }
+    }
+    if !root.voice-panel: Rectangle { y: parent.height - 1px; height: 1px; background: Theme.edge; }
+    if !root.voice-here && root.voice-panel: JoinVoice {
+        room-name: root.room-name; voice-description: root.voice-description; preview: root.preview;
+        call-encrypted: root.call-encrypted; voice-active: root.voice-active; can-join: root.can-join;
+        join-voice => { root.join-voice(); }
+    }
+    if root.voice-here: VerticalLayout {
+        spacing: 0px;
+        HorizontalLayout {
+            padding: 16px; padding-bottom: 0px;
+            Text { text: root.voice-description; color: Theme.muted; font-size: 14px; wrap: word-wrap; horizontal-alignment: center; }
+        }
+        if !root.stage-full: ParticipantGrid {
+            participants: root.participants; frames: root.participant-frames;
+            camera-starting: root.camera-starting; sharing: root.sharing; share-live: root.share-live;
+            share-status: root.share-status; share-frame: root.share-frame;
+            share-viewers: root.share-viewers; share-viewer-names: root.share-viewer-names;
+            stream-tiles: root.stream-tiles; watch-user: root.watch-user; watch-frame: root.watch-frame;
+            watch-status: root.watch-status; watch-viewers: root.watch-viewers; watch-viewer-names: root.watch-viewer-names;
+            focused: root.call-focus;
+            focus-tile(slot) => { root.focus-tile(slot); }
+            full-screen(on) => { root.stage-full = on; }
+            watch-stream(id) => { root.watch-stream(id); }
+            stop-watching => { root.stop-watching(); }
+            open-volume(person, x, y) => { root.open-voice-menu(root.voice-channel, person, x, y); }
+            tiles(columns, width, height, gap, top, scrolled, shown, focused, focus-width, focus-height) => {
+                root.call-tiles(columns, width, height, gap, top, scrolled, shown, focused, focus-width, focus-height);
+            }
+        }
+        CallControls {
+            muted: root.muted; deafened: root.deafened; voice-ready: root.voice-ready; voice-leaving: root.voice-leaving;
+            can-share: root.can-share; sharing: root.sharing;
+            can-film: root.can-film; camera-on: root.camera-on; camera-starting: root.camera-starting;
+            can-soundboard: root.can-soundboard;
+            toggle-camera => { root.toggle-camera(); }
+            toggle-mute => { root.toggle-mute(); }
+            toggle-deafen => { root.toggle-deafen(); }
+            toggle-share => { root.toggle-share(); }
+            open-share-menu(x, y) => { root.open-share-menu(x, y); }
+            open-soundboard(x, y) => { root.open-soundboard(x, y); }
+            leave-voice => { root.leave-voice(); }
+        }
+    }
+}

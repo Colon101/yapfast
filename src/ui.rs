@@ -921,6 +921,8 @@ struct Layout {
     sidebar_width: Option<f32>,
     /// The width of a Discord thread shown beside its channel.
     aside_width: Option<f32>,
+    /// The voice channel chat width, independent of threads and navigation.
+    voice_chat_width: Option<f32>,
     /// The GIF picker's width, as its left edge last dragged it wider.
     gif_picker_width: Option<f32>,
     /// The member list shows until someone closes it.
@@ -1202,6 +1204,9 @@ impl Layout {
         }
         if let Some(width) = self.aside_width {
             window.set_aside_width(width);
+        }
+        if let Some(width) = self.voice_chat_width {
+            window.set_voice_chat_preferred_width(width.clamp(160., 800.));
         }
         if let Some(width) = self.gif_picker_width {
             window.set_gif_picker_width(width);

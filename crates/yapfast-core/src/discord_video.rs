@@ -254,6 +254,7 @@ fn decode(frames: &Receiver<VideoFrame>, feeds: &Mutex<HashMap<u64, Feed>>) {
     type Sink = Box<dyn FnMut(&I420<'_>) + Send>;
     let mut decoders: HashMap<u64, (Decoder, Feed, Sink)> = HashMap::new();
     let mut pruned = Instant::now();
+    let mut rotated = Vec::new();
     loop {
         match frames.recv_timeout(PRUNE) {
             Ok(frame) => {
@@ -293,7 +294,9 @@ fn decode(frames: &Receiver<VideoFrame>, feeds: &Mutex<HashMap<u64, Feed>>) {
                     continue;
                 };
                 match decoder.decode(&frame.data) {
-                    Ok(Some(picture)) => sink(&picture.i420()),
+                    Ok(Some(picture)) => {
+                        sink(&picture.i420().rotated(frame.rotation, &mut rotated));
+                    }
                     Ok(None) => {}
                     Err(error) => {
                         tracing::debug!(%error, "dropped a camera's decoder");

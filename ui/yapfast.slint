@@ -25,7 +25,7 @@ import { Theme, Tip, ReactionHover, Middle, Popup, PopupMotion } from "theme.sli
 import { TitleBar, ResizeEdges } from "title_bar.slint";
 import { GifPicker, GifTile, PickerTab } from "gifs.slint";
 import { ActionButton, IconButton, PingToggle, DeviceToggle, Avatar, TextField, MessagesSkeleton, ContextMenu, MenuItem, MenuRow, DeviceMenu, HeaderToggle, Banner, StatusText } from "controls.slint";
-import { PersonRow, CallLink, CallLinkCard, LinkTouch, SignalIcon, VoiceDock, StreamPip, CallInvite, JoinVoice, ParticipantGrid, CallControls, IncomingCall, SwitchDialog, InputLevel, ShareMenu, ShareScreen, VolumeMenu, Soundboard, SoundRow } from "voice.slint";
+import { PersonRow, CallStage, CallLink, CallLinkCard, LinkTouch, SignalIcon, VoiceDock, StreamPip, CallInvite, JoinVoice, ParticipantGrid, CallControls, IncomingCall, SwitchDialog, InputLevel, ShareMenu, ShareScreen, VolumeMenu, Soundboard, SoundRow } from "voice.slint";
 import { ServerRow, RoomRow, StatusDot, ServerRail, ServerHeader, RoomList } from "rail.slint";
 import { StagedFile, StagedTile, Composer, MentionRow, MentionList, EmojiSuggestions, RequestBar } from "composer.slint";
 import { EmojiCell, EmojiRow, EmojiSection, MessageRow, ReactionToggle, EmojiButton, EmojiPicker, MessageMenu, MessageGallery, MessageStickers, FileCard, MessageContent, EmbedView, BotTag, NoConversation, ConversationStart, HistoryEdge, UnreadBar, PresentBar, ImageViewer, VideoViewer, VideoPlayer, Polls } from "messages.slint";
@@ -62,7 +62,7 @@ export { GifTile, GifFavorites } from "gifs.slint";
 export component YapfastWindow inherits Window {
     /// "Yapfast", or "(3) Yapfast" with mentions and DMs waiting, as a browser
     /// tab's title counts them, so the taskbar shows it.
-    in property <string> window-title: "Yapfast";
+    in property <string> window-title: "Yapfast — Kfir";
     title: root.window-title;
     preferred-width: 1120px; preferred-height: 760px;
     min-width: 800px; min-height: 560px;
@@ -397,6 +397,15 @@ export component YapfastWindow inherits Window {
     in property <bool> call-encrypted;
     /// A voice room shows its call, rather than its chat.
     property <bool> voice-panel: root.voice-room && !root.voice-chat;
+    // Only the call body is split; release navigation, docks and profile layouts stay as they are.
+    out property <length> conversation-width: max(0px, root.width - 72px - root.sidebar-shown - root.docked-width);
+    in-out property <length> voice-chat-preferred-width: 420px;
+    out property <length> voice-chat-max-width: max(160px, min(800px, root.conversation-width - 240px));
+    out property <length> voice-chat-min-width: min(280px, root.voice-chat-max-width);
+    out property <length> voice-chat-width: root.voice-room && root.voice-chat
+        ? max(root.voice-chat-min-width, min(root.voice-chat-max-width, root.voice-chat-preferred-width)) : 0px;
+    out property <length> voice-stage-width: root.voice-room ? root.conversation-width - root.voice-chat-width : 0px;
+    callback voice-chat-resized(length);
     in property <bool> composer-enabled;
     /// The selected conversation is a Discord message request, introduced by
     /// the title; it's answered instead of written to.
@@ -728,7 +737,7 @@ export component YapfastWindow inherits Window {
     callback choose-entrance-sound(string);
     /// The call's grid of tiles is on screen, in its conversation or over
     /// the whole window.
-    out property <bool> grid-shown: root.stage-full || (root.voice-here && (root.voice-panel || root.call-shown));
+    out property <bool> grid-shown: root.stage-full || (root.voice-here && (root.voice-room || root.call-shown));
     /// The streams of those who film too, in tiles of their own, as indexes of
     /// `participants`; see ParticipantGrid.
     in property <[int]> stream-tiles;
@@ -2325,7 +2334,7 @@ export component YapfastWindow inherits Window {
                         if root.has-voice-chat: Middle {
                             IconButton {
                                 icon: root.voice-chat ? @image-url("icons/volume-2.svg") : @image-url("icons/message-square-text.svg");
-                                label: root.voice-chat ? "Show voice channel" : "Open chat";
+                                label: root.voice-chat ? "Close chat" : "Open chat";
                                 tip-side: 2;
                                 clicked => { root.show-voice-chat(!root.voice-chat); }
                             }
@@ -2458,8 +2467,80 @@ export component YapfastWindow inherits Window {
                 }
                 HorizontalLayout {
                     spacing: 0px;
-                    VerticalLayout {
-                        spacing: 0px; horizontal-stretch: 1;
+                    if root.voice-room: CallStage {
+                        width: root.voice-stage-width;
+                        voice-here: root.voice-here;
+                        voice-panel: root.voice-room;
+                        call-people: root.call-people;
+                        call-note: root.call-note;
+                        call-incoming: root.call-incoming;
+                        call-room: root.call-room;
+                        can-join: root.can-join;
+                        answer-call(room, accept) => { root.answer-call(room, accept); }
+                        room-name: root.room-name;
+                        voice-description: root.voice-description;
+                        preview: root.preview;
+                        call-encrypted: root.call-encrypted;
+                        voice-active: root.voice-active;
+                        join-voice => { root.join-voice(); }
+                        stage-full <=> root.stage-full;
+                        participants: root.participants;
+                        participant-frames: root.participant-frames;
+                        camera-starting: root.camera-starting;
+                        sharing: root.sharing;
+                        share-live: root.share-live;
+                        share-status: root.share-status;
+                        share-frame: root.share-frame;
+                        share-viewers: root.share-viewers;
+                        share-viewer-names: root.share-viewer-names;
+                        stream-tiles: root.stream-tiles;
+                        watch-user: root.watch-user;
+                        watch-frame: root.watch-frame;
+                        watch-status: root.watch-status;
+                        watch-viewers: root.watch-viewers;
+                        watch-viewer-names: root.watch-viewer-names;
+                        call-focus: root.call-focus;
+                        focus-tile(slot) => { root.focus-tile(slot); }
+                        watch-stream(id) => { root.watch-stream(id); }
+                        stop-watching => { root.stop-watching(); }
+                        open-voice-menu(room, person, x, y) => { root.open-voice-menu(room, person, x, y); }
+                        voice-channel: root.voice-channel;
+                        call-tiles(columns, width, height, gap, top, scrolled, shown, focused, focus-width, focus-height) => { root.call-tiles(columns, width, height, gap, top, scrolled, shown, focused, focus-width, focus-height); }
+                        muted: root.muted;
+                        deafened: root.deafened;
+                        voice-ready: root.voice-ready;
+                        voice-leaving: root.voice-leaving;
+                        can-share: root.can-share;
+                        can-film: root.can-film;
+                        camera-on: root.camera-on;
+                        can-soundboard: root.can-soundboard;
+                        toggle-camera => { root.toggle-camera(); }
+                        toggle-mute => { root.toggle-mute(); }
+                        toggle-deafen => { root.toggle-deafen(); }
+                        toggle-share => { root.toggle-share(); }
+                        open-share-menu(x, y) => { root.open-share-menu(x, y); }
+                        open-soundboard(x, y) => { root.open-soundboard(x, y); }
+                        leave-voice => { root.leave-voice(); }
+                    }
+                    chat-column := Rectangle {
+                        width: root.voice-room ? root.voice-chat-width : root.conversation-width;
+                        clip: root.voice-room;
+                        if root.voice-room && root.voice-chat: Rectangle {
+                            x: 0px; y: 0px; width: 1px; height: parent.height; background: Theme.edge;
+                        }
+                        VerticalLayout {
+                        spacing: 0px;
+                        if root.voice-room && root.voice-chat: Rectangle {
+                            height: 40px;
+                            HorizontalLayout {
+                                padding-left: 12px; padding-right: 8px; spacing: 8px;
+                                Text { text: root.room-name; color: Theme.text; font-size: 14px; font-weight: 600; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                                Middle {
+                                    IconButton { icon: @image-url("icons/x.svg"); label: "Close chat"; size: 28px; clicked => { root.show-voice-chat(false); } }
+                                }
+                            }
+                            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+                        }
                         if root.preview: Rectangle {
                             min-height: preview-content.preferred-height; background: Theme.raised; vertical-stretch: 0;
                             preview-content := HorizontalLayout {
@@ -2478,63 +2559,63 @@ export component YapfastWindow inherits Window {
                         }
                         if root.graphics-notice != "": Banner { text <=> root.graphics-notice; dismissed => { root.graphics-notice = ""; } }
                         if root.notice != "": Banner { text: root.notice; dismissed => { root.dismiss-notice(); } }
-                        // Voice channel: a stage of participants, or an invitation to join.
-                        // A DM's call shows the same above its messages.
-                        if root.voice-panel || root.call-shown: Rectangle {
-                            // Above a DM's messages, a call takes less than half the room,
-                            // more while watching a stream, and little while offering to join.
-                            vertical-stretch: root.voice-panel ? 1 : !root.voice-here ? 0 : root.call-focus >= 0 ? 1.8 : 0.8;
-                            min-height: root.voice-panel ? 0px : root.voice-here ? 260px : 210px;
-                            max-height: root.voice-panel || root.voice-here ? 100000px : 210px;
-                            background: Theme.stage;
-                            if !root.voice-here && !root.voice-panel: CallInvite {
-                                call-people: root.call-people; call-note: root.call-note; call-incoming: root.call-incoming;
-                                call-room: root.call-room; can-join: root.can-join;
-                                answer-call(room, accept) => { root.answer-call(room, accept); }
-                            }
-                            if !root.voice-panel: Rectangle { y: parent.height - 1px; height: 1px; background: Theme.edge; }
-                            if !root.voice-here && root.voice-panel: JoinVoice {
-                                room-name: root.room-name; voice-description: root.voice-description; preview: root.preview;
-                                call-encrypted: root.call-encrypted; voice-active: root.voice-active; can-join: root.can-join;
-                                join-voice => { root.join-voice(); }
-                            }
-                            if root.voice-here: VerticalLayout {
-                                spacing: 0px;
-                                HorizontalLayout {
-                                    padding: 16px; padding-bottom: 0px;
-                                    Text { text: root.voice-description; color: Theme.muted; font-size: 14px; wrap: word-wrap; horizontal-alignment: center; }
-                                }
-                                if !root.stage-full: ParticipantGrid {
-                                    participants: root.participants; frames: root.participant-frames;
-                                    camera-starting: root.camera-starting; sharing: root.sharing; share-live: root.share-live;
-                                    share-status: root.share-status; share-frame: root.share-frame;
-                                    share-viewers: root.share-viewers; share-viewer-names: root.share-viewer-names;
-                                    stream-tiles: root.stream-tiles; watch-user: root.watch-user; watch-frame: root.watch-frame;
-                                    watch-status: root.watch-status; watch-viewers: root.watch-viewers; watch-viewer-names: root.watch-viewer-names;
-                                    focused: root.call-focus;
-                                    focus-tile(slot) => { root.focus-tile(slot); }
-                                    full-screen(on) => { root.stage-full = on; }
-                                    watch-stream(id) => { root.watch-stream(id); }
-                                    stop-watching => { root.stop-watching(); }
-                                    open-volume(person, x, y) => { root.open-voice-menu(root.voice-channel, person, x, y); }
-                                    tiles(columns, width, height, gap, top, scrolled, shown, focused, focus-width, focus-height) => {
-                                        root.call-tiles(columns, width, height, gap, top, scrolled, shown, focused, focus-width, focus-height);
-                                    }
-                                }
-                                CallControls {
-                                    muted: root.muted; deafened: root.deafened; voice-ready: root.voice-ready; voice-leaving: root.voice-leaving;
-                                    can-share: root.can-share; sharing: root.sharing;
-                                    can-film: root.can-film; camera-on: root.camera-on; camera-starting: root.camera-starting;
-                                    can-soundboard: root.can-soundboard;
-                                    toggle-camera => { root.toggle-camera(); }
-                                    toggle-mute => { root.toggle-mute(); }
-                                    toggle-deafen => { root.toggle-deafen(); }
-                                    toggle-share => { root.toggle-share(); }
-                                    open-share-menu(x, y) => { root.open-share-menu(x, y); }
-                                    open-soundboard(x, y) => { root.open-soundboard(x, y); }
-                                    leave-voice => { root.leave-voice(); }
-                                }
-                            }
+                        // DM calls retain their release layout above messages.
+                        if !root.voice-room && root.call-shown: CallStage {
+                            vertical-stretch: !root.voice-here ? 0 : root.call-focus >= 0 ? 1.8 : 0.8;
+                            min-height: root.voice-here ? 260px : 210px;
+                            max-height: root.voice-here ? 100000px : 210px;
+                            voice-here: root.voice-here;
+                            voice-panel: root.voice-room;
+                            call-people: root.call-people;
+                            call-note: root.call-note;
+                            call-incoming: root.call-incoming;
+                            call-room: root.call-room;
+                            can-join: root.can-join;
+                            answer-call(room, accept) => { root.answer-call(room, accept); }
+                            room-name: root.room-name;
+                            voice-description: root.voice-description;
+                            preview: root.preview;
+                            call-encrypted: root.call-encrypted;
+                            voice-active: root.voice-active;
+                            join-voice => { root.join-voice(); }
+                            stage-full <=> root.stage-full;
+                            participants: root.participants;
+                            participant-frames: root.participant-frames;
+                            camera-starting: root.camera-starting;
+                            sharing: root.sharing;
+                            share-live: root.share-live;
+                            share-status: root.share-status;
+                            share-frame: root.share-frame;
+                            share-viewers: root.share-viewers;
+                            share-viewer-names: root.share-viewer-names;
+                            stream-tiles: root.stream-tiles;
+                            watch-user: root.watch-user;
+                            watch-frame: root.watch-frame;
+                            watch-status: root.watch-status;
+                            watch-viewers: root.watch-viewers;
+                            watch-viewer-names: root.watch-viewer-names;
+                            call-focus: root.call-focus;
+                            focus-tile(slot) => { root.focus-tile(slot); }
+                            watch-stream(id) => { root.watch-stream(id); }
+                            stop-watching => { root.stop-watching(); }
+                            open-voice-menu(room, person, x, y) => { root.open-voice-menu(room, person, x, y); }
+                            voice-channel: root.voice-channel;
+                            call-tiles(columns, width, height, gap, top, scrolled, shown, focused, focus-width, focus-height) => { root.call-tiles(columns, width, height, gap, top, scrolled, shown, focused, focus-width, focus-height); }
+                            muted: root.muted;
+                            deafened: root.deafened;
+                            voice-ready: root.voice-ready;
+                            voice-leaving: root.voice-leaving;
+                            can-share: root.can-share;
+                            can-film: root.can-film;
+                            camera-on: root.camera-on;
+                            can-soundboard: root.can-soundboard;
+                            toggle-camera => { root.toggle-camera(); }
+                            toggle-mute => { root.toggle-mute(); }
+                            toggle-deafen => { root.toggle-deafen(); }
+                            toggle-share => { root.toggle-share(); }
+                            open-share-menu(x, y) => { root.open-share-menu(x, y); }
+                            open-soundboard(x, y) => { root.open-soundboard(x, y); }
+                            leave-voice => { root.leave-voice(); }
                         }
                         // A forum's posts, in place of its messages.
                         if root.room-forum && !root.voice-panel: ForumPanel {
@@ -3080,6 +3161,7 @@ export component YapfastWindow inherits Window {
                             }
                             if root.composer-hint == "": Rectangle { height: 16px; }
                         }
+                        }
                     }
                     if root.search-open: SearchPanel {
                         width: 420px;
@@ -3183,6 +3265,23 @@ export component YapfastWindow inherits Window {
             }
         }
     }
+    // Drag the chat's left edge; it reserves 240px for the call stage.
+    if root.workspace && root.voice-room && root.voice-chat && !root.stage-full: TouchArea {
+        x: 72px + root.sidebar-shown + root.voice-stage-width - 4px;
+        y: root.title-height + 48px; width: 8px; height: root.height - self.y;
+        mouse-cursor: ew-resize;
+        moved => {
+            if self.pressed {
+                root.voice-chat-preferred-width = max(root.voice-chat-min-width, min(root.voice-chat-max-width,
+                    root.voice-chat-width - (self.mouse-x - self.pressed-x)));
+            }
+        }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.up { root.voice-chat-resized(root.voice-chat-width); }
+        }
+        double-clicked => { root.voice-chat-preferred-width = 420px; root.voice-chat-resized(420px); }
+        Rectangle { x: 3px; width: 2px; height: parent.height; background: parent.pressed || parent.has-hover ? Theme.accent : transparent; }
+    }
     // The edge between sidebar and conversation resizes the sidebar. A double-click
     // restores the default width.
     if root.workspace: TouchArea {
@@ -3228,7 +3327,7 @@ export component YapfastWindow inherits Window {
     // The stream being watched, this account's own or a camera, in a corner
     // while the call is off screen; see StreamPip. It starts at the top right
     // of the conversation and stays in the corner it's dragged nearest.
-    property <bool> call-on-screen: root.voice-here && (root.voice-panel || root.call-shown);
+    property <bool> call-on-screen: root.voice-here && (root.voice-room || root.call-shown);
     property <bool> pip-left;
     property <bool> pip-bottom;
     if root.pip-shown: StreamPip {

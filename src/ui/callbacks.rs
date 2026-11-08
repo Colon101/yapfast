@@ -950,6 +950,12 @@ pub(super) fn bind_callbacks(window: &YapfastWindow, adapter: &Rc<RefCell<Adapte
         adapter.layout.write(&adapter.root);
     });
     let state = adapter.clone();
+    window.on_voice_chat_resized(move |width| {
+        let mut adapter = state.borrow_mut();
+        adapter.layout.voice_chat_width = Some(width.clamp(160., 800.));
+        adapter.layout.write(&adapter.root);
+    });
+    let state = adapter.clone();
     window.on_gif_picker_width_chosen(move |width| {
         let mut adapter = state.borrow_mut();
         adapter.layout.gif_picker_width = Some(width);

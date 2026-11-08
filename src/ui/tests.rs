@@ -6842,3 +6842,142 @@ fn dragging_the_gif_pickers_left_edge_widens_it_no_further_than_the_server_list(
     assert_eq!(right_edge(), 1058.);
     window.hide().unwrap();
 }
+
+#[test]
+fn voice_chat_divider_drags_clamps_and_restores_its_saved_width() {
+    i_slint_backend_testing::init_no_event_loop();
+    let directory = tempfile::tempdir().unwrap();
+    let window = YapfastWindow::new().unwrap();
+    let adapter = Adapter::new(
+        Arc::new(BackgroundRuntime::new().unwrap()),
+        directory.path().into(),
+        &window,
+    )
+    .unwrap();
+    bind_callbacks(&window, &adapter);
+    window.invoke_explore_preview();
+    window.set_member_list(false);
+    window.set_voice_room(true);
+    window.set_voice_here(true);
+    window.set_voice_active(true);
+    window.set_voice_chat(true);
+    window.set_pip_kind(3);
+    window.show().unwrap();
+    window
+        .window()
+        .set_size(slint::LogicalSize::new(1600., 900.));
+    let drag = |distance: f32| {
+        let x = 72. + window.get_sidebar_shown() + window.get_voice_stage_width();
+        let button = slint::platform::PointerEventButton::Left;
+        let at = |x| slint::LogicalPosition::new(x, 400.);
+        let native = window.window();
+        native.dispatch_event(slint::platform::WindowEvent::PointerMoved { position: at(x) });
+        native.dispatch_event(slint::platform::WindowEvent::PointerPressed {
+            position: at(x),
+            button,
+        });
+        native.dispatch_event(slint::platform::WindowEvent::PointerMoved {
+            position: at(x + distance),
+        });
+        native.dispatch_event(slint::platform::WindowEvent::PointerReleased {
+            position: at(x + distance),
+            button,
+        });
+    };
+    assert_eq!(window.get_voice_chat_width(), 420.);
+    drag(-180.);
+    assert_eq!(window.get_voice_chat_width(), 600.);
+    assert_eq!(Layout::read(directory.path()).voice_chat_width, Some(600.));
+    assert_eq!(
+        window.get_sidebar_shown(),
+        240.,
+        "dragging chat must not move navigation"
+    );
+    drag(-1000.);
+    assert_eq!(window.get_voice_chat_width(), 800.);
+    drag(1000.);
+    assert_eq!(window.get_voice_chat_width(), 280.);
+    drag(-320.);
+    let next = YapfastWindow::new().unwrap();
+    Layout::read(directory.path()).apply(&next);
+    assert_eq!(next.get_voice_chat_preferred_width(), 600.);
+    for width in [800., 943., 1120., 1900.] {
+        window
+            .window()
+            .set_size(slint::LogicalSize::new(width, 900.));
+        assert!(window.get_voice_stage_width() >= 240.);
+        assert!(window.get_voice_chat_width() > 0. && window.get_voice_chat_width() <= 800.);
+        assert!(window.get_grid_shown() && !window.get_pip_shown());
+        let total = window.get_conversation_width();
+        assert!(
+            (window.get_voice_stage_width() + window.get_voice_chat_width() - total).abs() < 1.
+        );
+        window.set_voice_chat(false);
+        assert_eq!(window.get_voice_chat_width(), 0.);
+        assert_eq!(window.get_voice_stage_width(), total);
+        window.set_voice_chat(true);
+    }
+    assert_eq!(
+        window.get_voice_chat_width(),
+        600.,
+        "narrowing the window preserves the requested width"
+    );
+}
+
+#[test]
+fn opening_a_device_menu_does_not_move_the_release_layout() {
+    i_slint_backend_testing::init_no_event_loop();
+    let directory = tempfile::tempdir().unwrap();
+    let window = YapfastWindow::new().unwrap();
+    let adapter = Adapter::new(
+        Arc::new(BackgroundRuntime::new().unwrap()),
+        directory.path().into(),
+        &window,
+    )
+    .unwrap();
+    bind_callbacks(&window, &adapter);
+    window.invoke_explore_preview();
+    window.set_unmute_on_join(false);
+    window.show().unwrap();
+    adapter
+        .borrow_mut()
+        .action(&window, Action::RequestJoinVoice("lounge".into()));
+    let click = |x, y| {
+        let position = slint::LogicalPosition::new(x, y);
+        let button = slint::platform::PointerEventButton::Left;
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerMoved { position });
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerPressed { position, button });
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerReleased { position, button });
+    };
+    for width in [943., 1120., 1900.] {
+        window
+            .window()
+            .set_size(slint::LogicalSize::new(width, 900.));
+        let before = (
+            window.get_sidebar_shown(),
+            window.get_conversation_width(),
+            window.window().size(),
+        );
+        click(206., 872.);
+        assert!(
+            adapter.borrow().meter.is_some(),
+            "the input menu actually opened"
+        );
+        assert_eq!(
+            before,
+            (
+                window.get_sidebar_shown(),
+                window.get_conversation_width(),
+                window.window().size()
+            )
+        );
+        click(600., 450.);
+        assert!(adapter.borrow().meter.is_none());
+    }
+}

@@ -86,6 +86,8 @@ pub struct VideoFrame {
     pub codec: Codec,
     pub data: Vec<u8>,
     pub keyframe: bool,
+    /// Clockwise rotation to apply before fitting the camera in its tile.
+    pub rotation: u16,
 }
 
 /// This account's camera, sending.
@@ -200,6 +202,7 @@ struct Incoming {
     reorder: rtp::Reorder,
     assembler: Option<Assembler>,
     asked: Instant,
+    rotation: u16,
 }
 
 /// Everyone else's cameras: who films on which SSRC, what Yapfast asked for,
@@ -261,6 +264,7 @@ impl Receiving {
                 reorder: rtp::Reorder::default(),
                 assembler: None,
                 asked: Instant::now() - KEYFRAME_REQUESTS,
+                rotation: 0,
             },
         );
         true
@@ -351,11 +355,15 @@ impl Receiving {
                 let Some(data) = connection.dave.decrypt(incoming.user, frame.data) else {
                     continue;
                 };
+                if let Some(orientation) = frame.orientation {
+                    incoming.rotation = u16::from(orientation & 3) * 90;
+                }
                 let frame = VideoFrame {
                     user: incoming.user,
                     codec,
                     data,
                     keyframe: frame.keyframe,
+                    rotation: incoming.rotation,
                 };
                 if let Err(channel::TrySendError::Full(_)) = self.frames.try_send(frame) {
                     // Decoding is behind; what follows needs this frame.

@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Install Kfir's build beside the packaged Yapfast and reuse its saved sign-in."""
+import argparse
+import os
+from pathlib import Path
+import shutil
+import subprocess
+
+repo = Path(__file__).resolve().parent.parent
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--binary', type=Path, default=repo / 'target/fast/yapfast')
+args = parser.parse_args()
+binary = args.binary.resolve(strict=True)
+local = Path.home() / '.local'
+data_home = Path(os.environ.get('XDG_DATA_HOME', local / 'share'))
+app_id = 'io.github.Colon101.Yapfast'
+destination = local / 'lib/yapfast-kfir/yapfast'
+profile = data_home / 'yapfast-kfir'
+original = data_home / 'yapfast'
+
+# Only the first install seeds settings/caches. Tokens and their cache key
+# stay in the existing OS credential store; the fork uses the same service.
+if not profile.exists():
+    profile.mkdir(parents=True, mode=0o700)
+    if original.is_dir():
+        def skip(folder, names):
+            return [name for name in names
+                    if name.startswith('instance.') or name in ('session.lock', 'logs')
+                    or not (Path(folder, name).is_file() or Path(folder, name).is_dir())
+                    or Path(folder, name).is_symlink()]
+        shutil.copytree(original, profile, dirs_exist_ok=True, ignore=skip)
+        profile.chmod(0o700)
+
+destination.parent.mkdir(parents=True, exist_ok=True)
+# Rename after copying so rebuilding while it runs never truncates its executable.
+staged = destination.with_suffix('.new')
+shutil.copyfile(binary, staged)
+staged.chmod(0o755)
+staged.replace(destination)
+icon = data_home / f'icons/hicolor/scalable/apps/{app_id}.svg'
+icon.parent.mkdir(parents=True, exist_ok=True)
+shutil.copyfile(repo / 'packaging/icon.svg', icon)
+
+
+def quoted(path):
+    value = str(path).replace('\\', '\\\\').replace('"', '\\"').replace('`', '\\`').replace('$', '\\$').replace('%', '%%')
+    return f'"{value}"'
+
+
+entry = data_home / f'applications/{app_id}.desktop'
+entry.parent.mkdir(parents=True, exist_ok=True)
+entry.write_text(f'''[Desktop Entry]
+Type=Application
+Name=Yapfast — Kfir
+GenericName=Discord Chat
+Comment=Kfir's Yapfast fork with camera rotation and docked call chat
+Exec={quoted(destination)} --data-dir {quoted(profile)} --open-link %u
+Icon={app_id}
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+Keywords=Discord;Voice;Camera;Kfir;
+StartupWMClass={app_id}
+''')
+entry.chmod(0o755)
+for command in [('desktop-file-validate', str(entry)),
+                ('update-desktop-database', str(entry.parent))]:
+    if shutil.which(command[0]):
+        subprocess.run(command, check=True)
+print(f'Installed {destination}')
+print(f'Launcher: {entry}')
+print(f'Local data: {profile}')
