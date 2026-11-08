@@ -6981,3 +6981,85 @@ fn opening_a_device_menu_does_not_move_the_release_layout() {
         assert!(adapter.borrow().meter.is_none());
     }
 }
+
+#[test]
+fn the_real_close_chat_button_keeps_the_call_area_visible() {
+    i_slint_backend_testing::init_no_event_loop();
+    for joined in [true, false] {
+        let directory = tempfile::tempdir().unwrap();
+        let window = YapfastWindow::new().unwrap();
+        let adapter = Adapter::new(
+            Arc::new(BackgroundRuntime::new().unwrap()),
+            directory.path().into(),
+            &window,
+        )
+        .unwrap();
+        bind_callbacks(&window, &adapter);
+        window.invoke_explore_preview();
+        {
+            let mut adapter = adapter.borrow_mut();
+            if joined {
+                adapter.action(&window, Action::RequestJoinVoice("lounge".into()));
+            }
+            let room = adapter
+                .app
+                .state
+                .rooms
+                .iter_mut()
+                .find(|room| room.id == "lounge")
+                .unwrap();
+            Arc::make_mut(room).network = Network::Discord;
+            adapter.action(&window, Action::OpenChat("lounge".into()));
+            adapter.app.state.preview = false;
+            adapter.app.state.trusted = true;
+            adapter.app.state.account = Some("discord:1".into());
+        }
+        // Preview's banner holds open a closed, zero-width chat column. The
+        // real Discord view has no banner, so exercise that layout too.
+        window.set_preview(false);
+        window.set_trusted(true);
+        window.show().unwrap();
+        window
+            .window()
+            .set_size(slint::LogicalSize::new(1600., 900.));
+        let assert_visible = || {
+            assert!(window.get_conversation_height() > 800.);
+            slint::platform::update_timers_and_animations();
+            if joined {
+                let tiles = adapter.borrow().tiles.unwrap();
+                assert!(
+                    tiles.shown > 600.,
+                    "the rendered call grid collapsed: {tiles:?}"
+                );
+            }
+        };
+        for _ in 0..3 {
+            assert!(window.get_voice_room() && window.get_voice_chat());
+            assert_visible();
+            let position = slint::LogicalPosition::new(1578., 68.);
+            let button = slint::platform::PointerEventButton::Left;
+            window
+                .window()
+                .dispatch_event(slint::platform::WindowEvent::PointerMoved { position });
+            window
+                .window()
+                .dispatch_event(slint::platform::WindowEvent::PointerPressed { position, button });
+            window
+                .window()
+                .dispatch_event(slint::platform::WindowEvent::PointerReleased { position, button });
+            assert!(
+                !window.get_voice_chat(),
+                "the actual close button must run the application action"
+            );
+            assert!(window.get_voice_room());
+            assert_visible();
+            assert_eq!(
+                window.get_voice_stage_width(),
+                window.get_conversation_width()
+            );
+            assert_eq!(window.get_grid_shown(), joined);
+            window.invoke_show_voice_chat(true);
+        }
+        window.hide().unwrap();
+    }
+}

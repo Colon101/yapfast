@@ -406,6 +406,7 @@ export component YapfastWindow inherits Window {
         ? max(root.voice-chat-min-width, min(root.voice-chat-max-width, root.voice-chat-preferred-width)) : 0px;
     out property <length> voice-stage-width: root.voice-room ? root.conversation-width - root.voice-chat-width : 0px;
     callback voice-chat-resized(length);
+    out property <length> conversation-height: conversation-body.height;
     in property <bool> composer-enabled;
     /// The selected conversation is a Discord message request, introduced by
     /// the title; it's answered instead of written to.
@@ -2465,7 +2466,7 @@ export component YapfastWindow inherits Window {
                     }
                     Rectangle { y: parent.height - 1px; height: 1px; background: Theme.edge; }
                 }
-                HorizontalLayout {
+                conversation-body := HorizontalLayout {
                     spacing: 0px;
                     if root.voice-room: CallStage {
                         width: root.voice-stage-width;
@@ -2524,6 +2525,11 @@ export component YapfastWindow inherits Window {
                     }
                     chat-column := Rectangle {
                         width: root.voice-room ? root.voice-chat-width : root.conversation-width;
+                        // The closed column's children have max-height 0. Do not
+                        // propagate that limit to the call beside it.
+                        min-height: 0px;
+                        max-height: 100000px;
+                        vertical-stretch: 1;
                         clip: root.voice-room;
                         if root.voice-room && root.voice-chat: Rectangle {
                             x: 0px; y: 0px; width: 1px; height: parent.height; background: Theme.edge;

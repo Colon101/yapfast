@@ -21,6 +21,8 @@ The changes on top of the release are limited to:
   Double-click the divider to restore 420px. It reserves at least 240px for
   the call, clamps chat to 280–800px where space permits, and narrows chat
   further in small windows. Opening a menu does not size the conversation.
+  Closing chat leaves the call at full height: the hidden column no longer
+  passes its children's zero maximum height to the shared call layout.
 - A distinct **Yapfast — Kfir** window/app ID and user-local installer.
 
 Build using [building.md](building.md), then run
@@ -31,5 +33,15 @@ existing OS credential store.
 
 Tests cover video rotation, RTP orientation metadata, actual mouse drags,
 resize limits, saved width/restoration, narrow windows, call/PiP visibility,
-and menu opening without shifting the release layout. Visual comparisons
-use the packaged 0.3.0 binary and a local fake Discord account.
+and menu opening without shifting the release layout. The real close button
+is exercised through the application callback. A separate rendered-window
+regression checks the call after six open/close cycles, a divider drag, and
+narrowing the window; it reproduces the blank view that headless preview
+geometry missed. Run it with Xvfb, xdotool, ImageMagick, Pillow and bun:
+
+```sh
+python3 testing/probe_call_chat.py --output /tmp/yapfast-call-chat
+```
+
+It uses a private display, bus, profile and fake Discord without joining a
+call. Visual comparisons use the packaged 0.3.0 binary and that local account.
